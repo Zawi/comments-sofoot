@@ -67,6 +67,12 @@
         color: #666;
         margin-top: 10px;
     }
+
+    .comment-level {
+        font-size: 0.8em;
+        color: #666;
+        margin-bottom: 5px;
+    }
     </style>
 </head>
 <body>
@@ -83,34 +89,50 @@
             return;
         }
 
-        const baseUrl = `https://reactions-api.s3.eu-west-3.amazonaws.com/story/${storyId}/comments/all/asc/hierarchie/`;
-        const urlSuffix = '.json';
+        const storyUrl = `https://reactions-api.s3.eu-west-3.amazonaws.com/story/${storyId}.json`;
+        const mainTitle = document.querySelector('h1');
 
-        async function fetchAllComments() {
-            let page = 1;
-            let allComments = [];
-            while (true) {
-                const url = `${baseUrl}${page}${urlSuffix}`;
-                try {
-                    const response = await fetch(url);
-                    if (response.status === 404) { // Stop if page not found
-                        break;
-                    }
-                    if (!response.ok) {
-                        throw new Error(`Network response was not ok for page ${page}`);
-                    }
-                    const data = await response.json();
-                    if (data.comments && data.comments.length > 0) {
-                        allComments = allComments.concat(data.comments);
-                        page++;
-                    } else {
-                        break; // No more comments
-                    }
-                } catch (error) {
-                    console.error(`Failed to fetch page ${page}:`, error);
-                    break; // Stop on error
-                }
+        async function fetchStoryData() {
+            const response = await fetch(storyUrl);
+            if (!response.ok) {
+                throw new Error('Could not fetch story metadata.');
             }
+            const data = await response.json();
+            const commentsUrl = data.cdnFiles.find(url => url.includes('/asc/hierarchie/'));
+            if (!commentsUrl) {
+                throw new Error('Could not find comments URL.');
+            }
+
+            mainTitle.innerHTML = `<a href="${data.url}" target="_blank">${data.title}</a>`;
+
+            // remove the 1.json from the url
+            return commentsUrl.substring(0, commentsUrl.lastIndexOf('/') + 1);
+        }
+
+        async function fetchAllComments(baseUrl) {
+            const firstPageUrl = `${baseUrl}1.json`;
+            const firstPageResponse = await fetch(firstPageUrl);
+            if (!firstPageResponse.ok) {
+                throw new Error('Could not fetch the first page of comments.');
+            }
+            const firstPageData = await firstPageResponse.json();
+            let allComments = firstPageData.comments;
+
+            const totalPages = firstPageData.pages;
+            if (totalPages > 1) {
+                const pagePromises = [];
+                for (let page = 2; page <= totalPages; page++) {
+                    const pageUrl = `${baseUrl}${page}.json`;
+                    pagePromises.push(fetch(pageUrl).then(res => res.json()));
+                }
+                const subsequentPagesData = await Promise.all(pagePromises);
+                subsequentPagesData.forEach(pageData => {
+                    if (pageData.comments) {
+                        allComments = allComments.concat(pageData.comments);
+                    }
+                });
+            }
+
             displayComments(allComments);
         }
 
@@ -137,19 +159,24 @@
             authorElement.classList.add('comment-author');
             authorElement.textContent = comment.member || 'Anonymous';
 
+            const levelElement = document.createElement('div');
+            levelElement.classList.add('comment-level');
+            levelElement.textContent = comment.level || '';
+
             const textElement = document.createElement('div');
             textElement.classList.add('comment-text');
             textElement.innerHTML = comment.body; // Use innerHTML to render HTML tags in comments
 
             const dateElement = document.createElement('div');
             dateElement.classList.add('comment-date');
-            dateElement.textContent = new Date(comment.createdAt).toLocaleString();
+            dateElement.textContent = comment.since;
 
             const votesElement = document.createElement('div');
             votesElement.classList.add('comment-votes');
             votesElement.textContent = `Upvotes: ${comment.upvotes}, Downvotes: ${comment.downvotes}`;
 
             commentElement.appendChild(authorElement);
+            commentElement.appendChild(levelElement);
             commentElement.appendChild(textElement);
             commentElement.appendChild(dateElement);
             commentElement.appendChild(votesElement);
@@ -167,10 +194,12 @@
             return commentElement;
         }
 
-        fetchAllComments().catch(error => {
-            console.error('There has been a problem with your fetch operation:', error);
-            commentsContainer.innerHTML = `<p>Error loading comments: ${error.message}</p>`;
-        });
+        fetchStoryData()
+            .then(baseUrl => fetchAllComments(baseUrl))
+            .catch(error => {
+                console.error('Error:', error);
+                commentsContainer.innerHTML = `<p>${error.message}</p>`;
+            });
     });
     </script>
 </body>
