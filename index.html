@@ -73,6 +73,19 @@
         color: #666;
         margin-bottom: 5px;
     }
+
+    .comment-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+
+    .comment-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        margin-right: 10px;
+    }
     </style>
 </head>
 <body>
@@ -155,6 +168,15 @@
                 commentElement.style.marginLeft = '20px';
             }
 
+            const headerElement = document.createElement('div');
+            headerElement.classList.add('comment-header');
+
+            const avatarElement = document.createElement('img');
+            avatarElement.classList.add('comment-avatar');
+            avatarElement.src = comment.avatar;
+
+            const authorAndLevel = document.createElement('div');
+
             const authorElement = document.createElement('div');
             authorElement.classList.add('comment-author');
             authorElement.textContent = comment.member || 'Anonymous';
@@ -163,20 +185,25 @@
             levelElement.classList.add('comment-level');
             levelElement.textContent = comment.level || '';
 
+            authorAndLevel.appendChild(authorElement);
+            authorAndLevel.appendChild(levelElement);
+
+            headerElement.appendChild(avatarElement);
+            headerElement.appendChild(authorAndLevel);
+
             const textElement = document.createElement('div');
             textElement.classList.add('comment-text');
             textElement.innerHTML = comment.body; // Use innerHTML to render HTML tags in comments
 
             const dateElement = document.createElement('div');
             dateElement.classList.add('comment-date');
-            dateElement.textContent = comment.since;
+            dateElement.textContent = `${comment.since} (${new Date(comment.createdAt).toLocaleString()})`;
 
             const votesElement = document.createElement('div');
             votesElement.classList.add('comment-votes');
-            votesElement.textContent = `Upvotes: ${comment.upvotes}, Downvotes: ${comment.downvotes}`;
+            votesElement.innerHTML = `<strong>${comment.rating}</strong> &mdash; ▲ ${comment.upvotes} ▼ ${comment.downvotes}`;
 
-            commentElement.appendChild(authorElement);
-            commentElement.appendChild(levelElement);
+            commentElement.appendChild(headerElement);
             commentElement.appendChild(textElement);
             commentElement.appendChild(dateElement);
             commentElement.appendChild(votesElement);
