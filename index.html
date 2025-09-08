@@ -91,9 +91,22 @@
 <body>
     <h1>Comments</h1>
     <div id="comments-container"></div>
+    <!-- Modal for comment metadata -->
+    <div id="comment-modal" aria-hidden="true" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:9999;">
+        <div id="comment-modal-dialog" style="background:#fff; max-width:720px; width:90%; border-radius:8px; padding:16px; box-shadow:0 6px 24px rgba(0,0,0,0.2);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h2 id="comment-modal-title" style="margin:0; font-size:1.1rem">Comment metadata</h2>
+                <button id="comment-modal-close" aria-label="Close" style="background:#eee;border:0;padding:6px 10px;border-radius:6px;cursor:pointer">Close</button>
+            </div>
+            <div id="comment-modal-body" style="max-height:60vh; overflow:auto; font-size:0.95rem; color:#222;"></div>
+        </div>
+    </div>
     <script>
     document.addEventListener('DOMContentLoaded', () => {
         const commentsContainer = document.getElementById('comments-container');
+        const commentModal = document.getElementById('comment-modal');
+        const commentModalBody = document.getElementById('comment-modal-body');
+        const commentModalClose = document.getElementById('comment-modal-close');
         const params = new URLSearchParams(window.location.search);
         const storyId = params.get('storyId');
 
@@ -149,6 +162,105 @@
             displayComments(allComments);
         }
 
+        // CommentModel maps the JSON response to a clean object and exposes a metadata renderer
+        class CommentModel {
+            constructor(json) {
+                // copy most useful fields and keep original JSON
+                this.raw = json;
+                this.id = json.id;
+                this.storyId = json.storyId;
+                this.parentId = json.parentId;
+                this.memberId = json.memberId;
+                this.member = json.member;
+                this.memberInitiales = json.memberInitiales;
+                this.memberRating = json.memberRating;
+                this.memberIsVip = json.memberIsVip;
+                this.createdAt = json.createdAt;
+                this.body = json.body;
+                this.rating = json.rating;
+                this.upvotes = json.upvotes;
+                this.downvotes = json.downvotes;
+                this.ip = json.ip;
+                this.avatar = json.avatar;
+                this.mention = json.mention;
+                this.level = json.level;
+                this.memberMeta = json.memberMeta || null;
+                this.answers = json.answers || [];
+                this.depth = json.depth || 0;
+                this.rich = json.rich || false;
+                this.since = json['since'] || json['since-full'] || '';
+                this.parsed = json.parsed || false;
+                this.editable = json.editable || false;
+            }
+
+            // small renderer to produce an object->HTML list of metadata
+            renderMetadata() {
+                const rows = [];
+                const push = (k, v) => rows.push(`<div style="margin-bottom:6px"><strong>${escapeHtml(k)}:</strong> <span style="color:#333">${escapeHtml(String(v))}</span></div>`);
+
+                push('id', this.id);
+                push('storyId', this.storyId);
+                push('parentId', this.parentId === false ? 'false' : (this.parentId ?? ''));
+                push('memberId', this.memberId);
+                push('member', this.member);
+                push('memberInitiales', this.memberInitiales);
+                push('memberRating', this.memberRating);
+                push('memberIsVip', this.memberIsVip);
+                push('createdAt', this.createdAt);
+                push('since', this.since);
+                push('rating', this.rating);
+                push('upvotes', this.upvotes);
+                push('downvotes', this.downvotes);
+                push('ip', this.ip || '');
+                push('level', this.level || '');
+                push('depth', this.depth);
+                push('parsed', this.parsed);
+                push('editable', this.editable);
+                push('answersCount', this.answers.length);
+
+                if (this.memberMeta) {
+                    const metaItems = Object.keys(this.memberMeta).map(k => `${escapeHtml(k)}: ${escapeHtml(String(this.memberMeta[k]))}`).join('<br>');
+                    rows.push(`<div style="margin-top:8px"><strong>memberMeta:</strong><div style="margin-left:6px;">${metaItems}</div></div>`);
+                }
+
+                // provide a preview of the original text
+                rows.push(`<hr style="border:none;border-top:1px solid #eee;margin:10px 0">`);
+                rows.push(`<div><strong>original:</strong><div style="margin-top:6px; color:#111;">${escapeHtml(this.raw.original ?? this.body ?? '')}</div></div>`);
+
+                return rows.join('');
+            }
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function showCommentMetadata(commentJson) {
+            const model = new CommentModel(commentJson);
+            commentModalBody.innerHTML = model.renderMetadata();
+            commentModal.style.display = 'flex';
+            commentModal.setAttribute('aria-hidden', 'false');
+        }
+
+        function hideCommentMetadata() {
+            commentModal.style.display = 'none';
+            commentModal.setAttribute('aria-hidden', 'true');
+            commentModalBody.innerHTML = '';
+        }
+
+        commentModalClose.addEventListener('click', hideCommentMetadata);
+        commentModal.addEventListener('click', (e) => {
+            if (e.target === commentModal) hideCommentMetadata();
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && commentModal.getAttribute('aria-hidden') === 'false') hideCommentMetadata();
+        });
+
         function displayComments(comments) {
             commentsContainer.innerHTML = ''; // Clear loading/error messages
             if (comments.length === 0) {
@@ -190,6 +302,22 @@
 
             headerElement.appendChild(avatarElement);
             headerElement.appendChild(authorAndLevel);
+
+            // details button to open modal with comment metadata
+            const detailsBtn = document.createElement('button');
+            detailsBtn.textContent = 'Details';
+            detailsBtn.title = 'Show comment metadata';
+            detailsBtn.style.marginLeft = 'auto';
+            detailsBtn.style.background = '#f1f1f1';
+            detailsBtn.style.border = '0';
+            detailsBtn.style.padding = '6px 8px';
+            detailsBtn.style.borderRadius = '6px';
+            detailsBtn.style.cursor = 'pointer';
+            detailsBtn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                showCommentMetadata(comment);
+            });
+            headerElement.appendChild(detailsBtn);
 
             const textElement = document.createElement('div');
             textElement.classList.add('comment-text');
