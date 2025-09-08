@@ -101,12 +101,27 @@
             <div id="comment-modal-body" style="max-height:60vh; overflow:auto; font-size:0.95rem; color:#222;"></div>
         </div>
     </div>
+    <!-- Modal for geo details -->
+    <div id="geo-modal" aria-hidden="true" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; z-index:10000;">
+        <div id="geo-modal-dialog" style="background:#fff; max-width:640px; width:92%; border-radius:8px; padding:14px; box-shadow:0 6px 24px rgba(0,0,0,0.22);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <h3 id="geo-modal-title" style="margin:0; font-size:1rem">IP geolocation</h3>
+                <button id="geo-modal-close" aria-label="Close geo" style="background:#eee;border:0;padding:6px 10px;border-radius:6px;cursor:pointer">Close</button>
+            </div>
+            <div id="geo-modal-body" style="max-height:60vh; overflow:auto; font-size:0.95rem; color:#222;"></div>
+        </div>
+    </div>
     <script>
     document.addEventListener('DOMContentLoaded', () => {
         const commentsContainer = document.getElementById('comments-container');
-        const commentModal = document.getElementById('comment-modal');
-        const commentModalBody = document.getElementById('comment-modal-body');
-        const commentModalClose = document.getElementById('comment-modal-close');
+    const commentModal = document.getElementById('comment-modal');
+    const commentModalBody = document.getElementById('comment-modal-body');
+    const commentModalClose = document.getElementById('comment-modal-close');
+    // simple in-memory cache for IP geolocation results to avoid repeated external calls
+    const geoCache = new Map(); // ip -> { ok: true, data } | { ok: false, error }
+    const geoModal = document.getElementById('geo-modal');
+    const geoModalBody = document.getElementById('geo-modal-body');
+    const geoModalClose = document.getElementById('geo-modal-close');
         const params = new URLSearchParams(window.location.search);
         const storyId = params.get('storyId');
 
@@ -211,7 +226,8 @@
                 push('rating', this.rating);
                 push('upvotes', this.upvotes);
                 push('downvotes', this.downvotes);
-                push('ip', this.ip || '');
+                // show IP and a button to open the geo modal (no inline geo text in this modal)
+                rows.push(`<div style="margin-bottom:6px"><strong>ip:</strong> <span style="color:#333">${escapeHtml(this.ip || '')}</span> <button id="geo-btn-${escapeHtml(String(this.id))}" disabled style="margin-left:8px;padding:4px 6px;border-radius:6px;border:0;cursor:pointer">Show geo details</button></div>`);
                 push('level', this.level || '');
                 push('depth', this.depth);
                 push('parsed', this.parsed);
@@ -240,11 +256,82 @@
                 .replace(/'/g, '&#39;');
         }
 
-        function showCommentMetadata(commentJson) {
+        async function fetchGeoForIp(ip) {
+            if (!ip) return { ok: false, error: 'no-ip' };
+            if (geoCache.has(ip)) return geoCache.get(ip);
+            try {
+                // ipwho.is is free for basic lookups and CORS-friendly
+                const resp = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`);
+                if (!resp.ok) throw new Error('network-error');
+                const data = await resp.json();
+                const result = { ok: !!data.success, data };
+                geoCache.set(ip, result);
+                return result;
+            } catch (err) {
+                const result = { ok: false, error: String(err) };
+                geoCache.set(ip, result);
+                return result;
+            }
+        }
+
+        async function showCommentMetadata(commentJson) {
             const model = new CommentModel(commentJson);
             commentModalBody.innerHTML = model.renderMetadata();
             commentModal.style.display = 'flex';
             commentModal.setAttribute('aria-hidden', 'false');
+
+            // attempt to load geo info for the IP and enable the geo details button
+            const ip = model.ip;
+            const detailsButton = commentModalBody.querySelector(`#${CSS.escape('geo-btn-' + String(model.id))}`);
+            if (!ip || !detailsButton) return;
+
+            // If the comment JSON already contains geo info, enable button immediately
+            if (model.raw.geo) {
+                detailsButton.disabled = false;
+                detailsButton.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    openGeoModal(model.id, ip, model.raw.geo);
+                });
+                return;
+            }
+
+            // otherwise fetch geo and enable button when available
+            detailsButton.disabled = true;
+            const geo = await fetchGeoForIp(ip);
+            if (!geo.ok) {
+                detailsButton.disabled = true;
+                return;
+            }
+            const d = geo.data;
+            detailsButton.disabled = false;
+            detailsButton.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                openGeoModal(model.id, ip, d);
+            });
+        }
+
+        function openGeoModal(commentId, ip, geoData) {
+            geoModalBody.innerHTML = renderGeoDetails(commentId, ip, geoData);
+            geoModal.style.display = 'flex';
+            geoModal.setAttribute('aria-hidden', 'false');
+        }
+
+        function renderGeoDetails(commentId, ip, d) {
+            const parts = [];
+            if (d.city) parts.push(escapeHtml(d.city));
+            if (d.region) parts.push(escapeHtml(d.region));
+            if (d.country) parts.push(escapeHtml(d.country));
+            const coords = (d.latitude && d.longitude) ? `${d.latitude},${d.longitude}` : '';
+            const isp = d.connection && (d.connection.isp || d.connection.org) ? escapeHtml(d.connection.isp || d.connection.org) : '';
+
+            return `
+                <div style="margin-bottom:8px"><strong>IP</strong>: ${escapeHtml(ip)}</div>
+                <div style="margin-bottom:8px"><strong>Location</strong>: ${parts.join(' - ') || 'Unknown'}</div>
+                ${coords ? `<div style="margin-bottom:8px"><strong>Coordinates</strong>: ${escapeHtml(coords)}</div>` : ''}
+                ${isp ? `<div style="margin-bottom:8px"><strong>ISP</strong>: ${isp}</div>` : ''}
+                <div style="margin-top:10px"><a target="_blank" rel="noopener" href="${coords ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(coords) : '#'}">Open in Google Maps</a></div>
+                <pre style="margin-top:12px; padding:8px; background:#f8f8f8; border-radius:6px; overflow:auto; font-size:0.85rem">${escapeHtml(JSON.stringify(d, null, 2))}</pre>
+            `;
         }
 
         function hideCommentMetadata() {
@@ -259,6 +346,19 @@
         });
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && commentModal.getAttribute('aria-hidden') === 'false') hideCommentMetadata();
+        });
+
+        geoModalClose.addEventListener('click', () => {
+            geoModal.style.display = 'none';
+            geoModal.setAttribute('aria-hidden', 'true');
+            geoModalBody.innerHTML = '';
+        });
+        geoModal.addEventListener('click', (e) => {
+            if (e.target === geoModal) {
+                geoModal.style.display = 'none';
+                geoModal.setAttribute('aria-hidden', 'true');
+                geoModalBody.innerHTML = '';
+            }
         });
 
         function displayComments(comments) {
