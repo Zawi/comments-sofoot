@@ -226,8 +226,8 @@
                 push('rating', this.rating);
                 push('upvotes', this.upvotes);
                 push('downvotes', this.downvotes);
-                // show IP and a button to open the geo modal (no inline geo text in this modal)
-                rows.push(`<div style="margin-bottom:6px"><strong>ip:</strong> <span style="color:#333">${escapeHtml(this.ip || '')}</span> <button id="geo-btn-${escapeHtml(String(this.id))}" disabled style="margin-left:8px;padding:4px 6px;border-radius:6px;border:0;cursor:pointer">Show geo details</button></div>`);
+                // show IP, a small flag placeholder, and a button to open the geo modal
+                rows.push(`<div style="margin-bottom:6px"><strong>ip:</strong> <span style="color:#333">${escapeHtml(this.ip || '')}</span> <span id="flag-${escapeHtml(String(this.id))}" style="margin-left:6px"></span> <button id="geo-btn-${escapeHtml(String(this.id))}" disabled style="margin-left:8px;padding:4px 6px;border-radius:6px;border:0;cursor:pointer">Show geo details</button></div>`);
                 push('level', this.level || '');
                 push('depth', this.depth);
                 push('parsed', this.parsed);
@@ -285,15 +285,24 @@
             const detailsButton = commentModalBody.querySelector(`#${CSS.escape('geo-btn-' + String(model.id))}`);
             if (!ip || !detailsButton) return;
 
-            // If the comment JSON already contains geo info, enable button immediately
-            if (model.raw.geo) {
-                detailsButton.disabled = false;
-                detailsButton.addEventListener('click', (ev) => {
-                    ev.stopPropagation();
-                    openGeoModal(model.id, ip, model.raw.geo);
-                });
-                return;
-            }
+                // If the comment JSON already contains geo info, enable button immediately and set flag
+                const flagEl = commentModalBody.querySelector(`#${CSS.escape('flag-' + String(model.id))}`);
+                if (model.raw.geo) {
+                    const d = model.raw.geo;
+                    if (flagEl) {
+                        if (d.flag && d.flag.img) {
+                            flagEl.innerHTML = `<img src="${escapeHtml(d.flag.img)}" alt="${escapeHtml(d.country||'flag')}" style="width:18px;height:12px;vertical-align:middle;border-radius:2px;">`;
+                        } else if (d.country_code) {
+                            flagEl.textContent = d.country_code;
+                        }
+                    }
+                    detailsButton.disabled = false;
+                    detailsButton.addEventListener('click', (ev) => {
+                        ev.stopPropagation();
+                        openGeoModal(model.id, ip, d);
+                    });
+                    return;
+                }
 
             // otherwise fetch geo and enable button when available
             detailsButton.disabled = true;
@@ -308,6 +317,14 @@
                 ev.stopPropagation();
                 openGeoModal(model.id, ip, d);
             });
+            // set flag image if available
+            if (flagEl) {
+                if (d.flag && d.flag.img) {
+                    flagEl.innerHTML = `<img src="${escapeHtml(d.flag.img)}" alt="${escapeHtml(d.country||'flag')}" style="width:18px;height:12px;vertical-align:middle;border-radius:2px;">`;
+                } else if (d.country_code) {
+                    flagEl.textContent = d.country_code;
+                }
+            }
         }
 
         function openGeoModal(commentId, ip, geoData) {
